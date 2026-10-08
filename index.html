@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Skyblueice Trading Journal</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+*{box-sizing:border-box}body{margin:0;font-family:Inter,Arial,sans-serif;background:#eef9ff;color:#17324d}
+.wrap{max-width:1200px;margin:auto;padding:28px}
+header{background:linear-gradient(135deg,#dff6ff,#fff);padding:26px;border-radius:20px;box-shadow:0 8px 30px #9ac7d833;margin-bottom:20px}
+h1{margin:0;font-size:32px}.motto{margin-top:6px;color:#6c91a8;font-style:italic}
+.card{background:#fff;border-radius:18px;padding:20px;box-shadow:0 8px 25px #78abc222;margin-bottom:18px}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.stat{padding:15px;border-radius:14px;background:#f3fbff}.stat b{display:block;font-size:22px;margin-top:5px}
+form{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+input,select,textarea,button{width:100%;padding:11px;border:1px solid #c9e1ee;border-radius:10px;font:inherit}
+textarea{min-height:80px;grid-column:1/-1}button{cursor:pointer;background:#7bc9ed;color:#08324b;border:0;font-weight:700}
+button.secondary{background:#eaf6fb}.full{grid-column:1/-1}
+.tablewrap{overflow:auto}table{width:100%;border-collapse:collapse;min-width:1050px}th,td{padding:10px;border-bottom:1px solid #e3eef4;text-align:left;white-space:nowrap}th{background:#f2faff}
+.actions button{width:auto;padding:7px 10px;margin-right:4px}
+#app{display:none}.msg{margin-top:10px;padding:10px;border-radius:10px;background:#fff4d8;display:none}
+@media(max-width:800px){.grid,form{grid-template-columns:1fr 1fr}}@media(max-width:520px){.wrap{padding:14px}.grid,form{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+<h1>Skyblueice</h1><div class="motto">your dream is not imposible</div>
+</header>
+
+<section id="auth" class="card">
+<h2>Login / Create Account</h2>
+<form id="authForm">
+<input id="email" type="email" placeholder="Email" required>
+<input id="password" type="password" placeholder="Password (min. 6)" minlength="6" required>
+<button type="button" id="loginBtn">Login</button>
+<button type="button" id="signupBtn" class="secondary">Create Account</button>
+</form>
+<div id="authMsg" class="msg"></div>
+</section>
+
+<section id="app">
+<div class="card">
+<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+<h2>Dashboard</h2><button id="logoutBtn" class="secondary" style="width:auto">Logout</button>
+</div>
+<div class="grid">
+<div class="stat">Net P/L<b id="net">0</b></div>
+<div class="stat">Win Rate<b id="winrate">0%</b></div>
+<div class="stat">Daily Win Rate<b id="daily">0%</b></div>
+<div class="stat">Average R:R<b id="avgrr">0</b></div>
+<div class="stat">Profit Factor<b id="pf">0</b></div>
+<div class="stat">Total Trades<b id="total">0</b></div>
+<div class="stat">Average Win<b id="avgwin">0</b></div>
+<div class="stat">Average Loss<b id="avgloss">0</b></div>
+<div class="stat">Best Trade<b id="best">0</b></div>
+<div class="stat">Current Trend<b id="trend">—</b></div>
+</div>
+</div>
+
+<div class="card">
+<h2 id="formTitle">Log Trade</h2>
+<form id="tradeForm">
+<input id="date" type="date" required>
+<input id="time" type="time">
+<input id="symbol" value="XAUUSD" placeholder="Symbol">
+<select id="direction"><option>BUY</option><option>SELL</option></select>
+<input id="entry" type="number" step="any" placeholder="Entry">
+<input id="exit" type="number" step="any" placeholder="Exit">
+<input id="sl" type="number" step="any" placeholder="Stop Loss">
+<input id="tp" type="number" step="any" placeholder="Take Profit">
+<input id="rr" type="number" step="any" placeholder="R:R">
+<input id="pl" type="number" step="any" placeholder="P/L">
+<input id="setup" placeholder="Setup">
+<select id="session"><option>Asia</option><option>London</option><option>New York</option><option>Other</option></select>
+<textarea id="notes" placeholder="Notes / Psychology"></textarea>
+<button id="saveBtn" class="full" type="submit">Save Trade</button>
+<button id="cancelBtn" class="full secondary" type="button" style="display:none">Cancel Edit</button>
+</form>
+<div id="tradeMsg" class="msg"></div>
+</div>
+
+<div class="card">
+<h2>Recent Trades</h2>
+<div class="tablewrap"><table><thead><tr>
+<th>Date</th><th>Time</th><th>Symbol</th><th>Direction</th><th>Entry</th><th>Exit</th><th>SL</th><th>TP</th><th>R:R</th><th>P/L</th><th>Setup</th><th>Session</th><th>Action</th>
+</tr></thead><tbody id="tradeRows"></tbody></table></div>
+</div>
+</section>
+</div>
+
+<script>
+const SUPABASE_URL="https://yqfkvhlnnuazldgirofb.supabase.co";
+const SUPABASE_PUBLISHABLE_KEY="sb_publishable_6zBLvZ7msMTcVb_9_1YMow_7r7Nf0wM";
+let client=null, trades=[], editingId=null;
+
+const $=id=>document.getElementById(id);
+function msg(el,text,show=true){el.textContent=text;el.style.display=show?"block":"none"}
+function num(v){return Number(v)||0}
+function money(v){return String(Math.round((num(v)+Number.EPSILON)*100)/100)}
+
+function init(){
+ if(!window.supabase){
+   msg($("authMsg"),"Supabase gagal dimuat. Pastikan koneksi internet aktif lalu refresh halaman."); return;
+ }
+ client=window.supabase.createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY);
+ $("loginBtn").onclick=login;
+ $("signupBtn").onclick=signup;
+ $("logoutBtn").onclick=logout;
+ $("tradeForm").onsubmit=saveTrade;
+ $("cancelBtn").onclick=resetForm;
+ client.auth.onAuthStateChange((_e,session)=>{ if(session) showApp(); else showAuth(); });
+ client.auth.getSession().then(({data})=>data.session?showApp():showAuth());
+}
+async function signup(){
+ try{
+  const {email,password}=getAuth();
+  const {error}=await client.auth.signUp({email,password});
+  if(error) throw error;
+  msg($("authMsg"),"Akun berhasil dibuat. Jika email confirmation aktif, cek email kamu lalu login.");
+ }catch(e){msg($("authMsg"),e.message||String(e))}
+}
+async function login(){
+ try{
+  const {email,password}=getAuth();
+  const {error}=await client.auth.signInWithPassword({email,password});
+  if(error) throw error;
+  msg($("authMsg"),"");
+ }catch(e){msg($("authMsg"),e.message||String(e))}
+}
+function getAuth(){return {email:$("email").value.trim(),password:$("password").value}}
+async function logout(){await client.auth.signOut()}
+function showAuth(){$("auth").style.display="block";$("app").style.display="none"}
+async function showApp(){$("auth").style.display="none";$("app").style.display="block";$("date").value ||= new Date().toISOString().slice(0,10);await loadTrades()}
+async function loadTrades(){
+ const {data,error}=await client.from("trades").select("*").order("date",{ascending:false}).order("time",{ascending:false});
+ if(error){msg($("tradeMsg"),error.message);return}
+ trades=data||[];render();dashboard();
+}
+async function saveTrade(ev){
+ ev.preventDefault();
+ const payload={date:$("date").value,time:$("time").value||null,symbol:$("symbol").value.trim()||"XAUUSD",
+ direction:$("direction").value,entry:num($("entry").value),exit:num($("exit").value),sl:num($("sl").value),
+ tp:num($("tp").value),rr:num($("rr").value),pl:num($("pl").value),setup:$("setup").value.trim(),
+ session:$("session").value,notes:$("notes").value.trim()};
+ try{
+  let res;
+  if(editingId) res=await client.from("trades").update(payload).eq("id",editingId);
+  else res=await client.from("trades").insert(payload);
+  if(res.error) throw res.error;
+  msg($("tradeMsg"),editingId?"Trade diperbarui.":"Trade tersimpan.");
+  resetForm();await loadTrades();
+ }catch(e){msg($("tradeMsg"),e.message||String(e))}
+}
+function render(){
+ $("tradeRows").innerHTML=trades.map(t=>`<tr>
+<td>${t.date||""}</td><td>${t.time||""}</td><td>${t.symbol||""}</td><td>${t.direction||""}</td>
+<td>${t.entry??""}</td><td>${t.exit??""}</td><td>${t.sl??""}</td><td>${t.tp??""}</td><td>${t.rr??""}</td>
+<td>${money(t.pl)}</td><td>${t.setup||""}</td><td>${t.session||""}</td>
+<td class="actions"><button onclick="editTrade('${t.id}')">Edit</button><button class="secondary" onclick="deleteTrade('${t.id}')">Delete</button></td>
+</tr>`).join("");
+}
+function dashboard(){
+ const total=trades.length, wins=trades.filter(t=>num(t.pl)>0),losses=trades.filter(t=>num(t.pl)<0);
+ const net=trades.reduce((a,t)=>a+num(t.pl),0), grossWin=wins.reduce((a,t)=>a+num(t.pl),0), grossLoss=Math.abs(losses.reduce((a,t)=>a+num(t.pl),0));
+ const days={};trades.forEach(t=>{days[t.date]??=[];days[t.date].push(t.pl)});const dayList=Object.values(days);
+ const goodDays=dayList.filter(a=>a.reduce((x,y)=>x+num(y),0)>0).length;
+ $("net").textContent=money(net);$("total").textContent=total;$("winrate").textContent=total?Math.round(wins.length/total*100)+"%":"0%";
+ $("daily").textContent=dayList.length?Math.round(goodDays/dayList.length*100)+"%":"0%";
+ $("avgrr").textContent=total?money(trades.reduce((a,t)=>a+num(t.rr),0)/total):"0";
+ $("pf").textContent=grossLoss?money(grossWin/grossLoss):grossWin? "∞":"0";
+ $("avgwin").textContent=wins.length?money(grossWin/wins.length):"0";$("avgloss").textContent=losses.length?money(-grossLoss/losses.length):"0";
+ $("best").textContent=total?money(Math.max(...trades.map(t=>num(t.pl)))):"0";
+ $("trend").textContent=net>0?"PROFIT":net<0?"LOSS":"FLAT";
+}
+window.editTrade=function(id){
+ const t=trades.find(x=>x.id===id);if(!t)return;editingId=id;
+ ["date","time","symbol","direction","entry","exit","sl","tp","rr","pl","setup","session","notes"].forEach(k=>$(k).value=t[k]??"");
+ $("formTitle").textContent="Edit Trade";$("saveBtn").textContent="Update Trade";$("cancelBtn").style.display="block";scrollTo({top:0,behavior:"smooth"});
+}
+window.deleteTrade=async function(id){
+ if(!confirm("Hapus trade ini?"))return;
+ const {error}=await client.from("trades").delete().eq("id",id);if(error){msg($("tradeMsg"),error.message);return}await loadTrades();
+}
+function resetForm(){editingId=null;$("tradeForm").reset();$("symbol").value="XAUUSD";$("date").value=new Date().toISOString().slice(0,10);$("formTitle").textContent="Log Trade";$("saveBtn").textContent="Save Trade";$("cancelBtn").style.display="none"}
+init();
+</script>
+</body>
+</html>
